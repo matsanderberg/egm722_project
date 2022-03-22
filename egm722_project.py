@@ -6,6 +6,7 @@ import cartopy.crs as ccrs
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import os
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 #import earthpy.plot as ep
 
@@ -15,13 +16,12 @@ class SatelliteImg:
     bands = {'Sentinel': {'Blue': 2, 'Green': 3, 'Red': 4, 'NIR': 8, 'SWIR': 12},
              'Landsat8': {'Blue': 2, 'Green': 3, 'Red': 4}}
 
-    img = {}
-    extent = []
-
     def __init__(self, satellite, file_path, date):
         self.satellite = satellite
         self.file_path = file_path
         self.date = date
+        self.img = {}
+        self.extent = []
 
     def load_band_data(self, outline_fp=None):
         # Crop image to outline if provided
@@ -44,7 +44,6 @@ class SatelliteImg:
                     # Write the cropped image to file
                     with rio.open("data_files/cropped_temp.tif", "w", **out_meta) as dest:
                         dest.write(out_image)
-                        xmin, ymin, xmax, ymax = dest.bounds
                         self.file_path = dest.name  # update file path to dataset with cropped image
 
         # Load the bands depending on satellite
@@ -55,7 +54,10 @@ class SatelliteImg:
                 self.img[key] = dataset.read(band)
 
             xmin, ymin, xmax, ymax = dataset.bounds
-            SatelliteImg.extent = [xmin, xmax, ymin, ymax]
+            self.extent = [xmin, xmax, ymin, ymax]
+
+        # Delete temp file
+        os.remove(self.file_path)
 
     '''
     TODO: write docstring
@@ -80,8 +82,11 @@ class SatelliteImg:
         ndvi = (self.img['NIR'].astype(int) - self.img['Red'].astype(int)) / (self.img['NIR'].astype(int) + self.img['Red'].astype(int))
 
         # Replace NaN with 0
-        np.nan_to_num(nbr, copy=False, nan=0)
+        np.nan_to_num(ndvi, copy=False, nan=0)
         return ndvi
+
+    def get_extent(self):
+        return self.extent
 
     def description(self):
         print('Satellite: ' + self.satellite)
@@ -89,47 +94,6 @@ class SatelliteImg:
         print('Spectral bands: ')
         for key in self.img.keys():
             print(key)
-
-
-pre_fire = SatelliteImg('Sentinel', 'data_files/karbole_sentinel2_june26.img', '2018-06-26')
-pre_fire.load_band_data('data_files/outline.shp')
-pre_nbr = pre_fire.nbr()
-
-post_fire = SatelliteImg('Sentinel', 'data_files/karbole_sentinel2_aug2.img', '2018-08-23')
-post_fire.load_band_data('data_files/outline.shp')
-post_nbr = post_fire.nbr()
-
-dnbr1 = pre_nbr - post_nbr
-
-pre_fire.description()
-post_fire.description()
-
-
-def index(band1, band2):
-    '''
-    TODO: write docstring
-    NBR = (NIR - SWIR2)/(NIR + SWIR2)
-    NIR = Band 8
-    SWIR2 = Band 12
-    '''
-    # Suppressing runtime warning for division by zero
-    np.seterr(divide='ignore', invalid='ignore')
-
-    nbr = (band1 - band2) / (band1 + band2)
-
-    # Replace NaN with 0
-    np.nan_to_num(nbr, copy=False, nan=0)
-
-    return nbr
-
-def delta(pre_img, post_img):
-    '''
-    TODO: write docstring
-    NBR = (NIR - SWIR2)/(NIR + SWIR2)
-    NIR = Band 8
-    SWIR2 = Band 12
-    '''
-    return pre_img - post_img
 
 def generate_handles(labels, colors, edge='k', alpha=1):
     lc = len(colors)  # get the length of the color list
@@ -153,63 +117,24 @@ def img_display(image, ax, bands, transform, extent):
 
     return handle, ax
 
-def load_band_data(file_path, band, outline):
-    '''
-    This is where you should write a docstring.
-    '''
-    with rio.open(file_path) as src:
-        try:
-            out_image, out_transform = mask.mask(src, outline['geometry'], crop=True)
-        except ValueError:
-            print(f"No overlap found for {src.files[0]}.")
-        else:
-            out_meta = src.meta
-            out_meta.update({"driver": "GTiff",
-                             "height": out_image.shape[1],
-                             "width": out_image.shape[2],
-                             "transform": out_transform})
+pre_fire = SatelliteImg('Sentinel', 'data_files/karbole_sentinel2_june26.img', '2018-06-26')
+pre_fire.load_band_data('data_files/outline.shp')
 
-            # Write the cropped image to file
-            with rio.open("data_files/cropped_temp.tif", "w", **out_meta) as dest:
-                dest.write(out_image)
+post_fire = SatelliteImg('Sentinel', 'data_files/karbole_sentinel2_aug2.img', '2018-08-23')
+post_fire.load_band_data('data_files/outline.shp')
 
-            # Read cropped image to memory
-            with rio.open("data_files/cropped_temp.tif") as dataset:
-                img = dataset.read(band)
-                xmin, ymin, xmax, ymax = dataset.bounds
+pre_nbr = pre_fire.nbr()
+post_nbr = post_fire.nbr()
+dnbr = pre_nbr - post_nbr
 
-            extent = [xmin, xmax, ymin, ymax]
+pre_ndvi = pre_fire.ndvi()
+post_ndvi = post_fire.ndvi()
+dndvi = pre_ndvi - post_ndvi
 
-            # Some debug printing during development
-            #print('{} opened in {} mode'.format(dataset.name, dataset.mode))
-            #print('image has {} band(s)'.format(dataset.count))
-            #print('image size (width, height): {} x {}'.format(dataset.width, dataset.height))
-            #print('band 1 dataype is {}'.format(dataset.dtypes[0]))  # note that the band name (Band 1) differs from the list index [0]
+pre_fire.description()
+post_fire.description()
 
-    return img, extent
-
-# Read the outline to mask the raster with
-outline = gpd.read_file('data_files/outline.shp')
-outline = outline.to_crs(epsg=32633) # should match the dataset
-
-prefire_path = 'data_files/karbole_sentinel2_june26.img' # TODO: read from init file
-postfire_path = 'data_files/karbole_sentinel2_aug2.img' # TODO: read from init file
-
-# Load band arrays
-prefire_b4, extent = load_band_data(prefire_path, 4, outline)
-prefire_b8a, extent = load_band_data(prefire_path, 8, outline)
-prefire_b12, extent = load_band_data(prefire_path, 12, outline)
-postfire_b4, extent = load_band_data(prefire_path, 4, outline)
-postfire_b8a, extent = load_band_data(postfire_path, 8, outline)
-postfire_b12, extent = load_band_data(postfire_path, 12, outline)
-
-pre_ndvi = index(prefire_b8a.astype(int), postfire_b4.astype(int))
-post_ndvi = index(postfire_b8a.astype(int), postfire_b4.astype(int))
-dndvi = delta(pre_ndvi, post_ndvi)
-
-pre_nbr = index(prefire_b8a.astype(int), prefire_b12.astype(int))
-post_nbr = index(postfire_b8a.astype(int), postfire_b12.astype(int))
-dnbr2 = delta(pre_nbr, post_nbr)
+extent = pre_fire.get_extent()
 
 myCRS = ccrs.UTM(33) # note that this matches with the CRS of our image
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 10), subplot_kw=dict(projection=myCRS))
@@ -220,7 +145,8 @@ cmap.set_over('purple')
 cmap.set_under('white')
 bounds = [-0.5, 0.1, 0.27, 0.440, 0.660, 1.3] # dNBR threshold values as defined by UN-Spider
 norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
-plt.title('Burn Severity Map')
+ax1.set_title('dNBR')
+ax2.set_title('dNDVI')
 
 # Legend
 labels = ['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity']
@@ -230,7 +156,7 @@ ax1.legend(handles, labels, fontsize=6, loc='lower left', framealpha=1)
 
 # Plot
 #h, ax = img_display(img, ax, [12,8,3], myCRS, [xmin, xmax, ymin, ymax])
-h = ax1.imshow(dnbr1, cmap=cmap, norm=norm, transform=myCRS, extent=extent)
+h = ax1.imshow(dnbr, cmap=cmap, norm=norm, transform=myCRS, extent=extent)
 #divider = make_axes_locatable(ax)
 #cax = divider.append_axes("right", size="5%", pad=0.1, axes_class=plt.Axes)
 #fig.colorbar(h, cax=cax, label='NBR')
@@ -238,11 +164,11 @@ h = ax1.imshow(dnbr1, cmap=cmap, norm=norm, transform=myCRS, extent=extent)
 #cbar = fig.colorbar(h, ax=ax, fraction=0.035, pad=0.04, ticks=[-0.2, 0.18, 0.35, 0.53, 1])
 #cbar.ax.set_yticklabels(['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity'])
 
-#bounds = [-0.1, 0.1, 0.2, 0.3, 0.5, 0.9] # dNBR threshold values as defined by UN-Spider
-#norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
+bounds = [-0.1, 0.1, 0.2, 0.3, 0.5, 0.9] # dNBR threshold values as defined by UN-Spider
+norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
 #h = ax2.imshow(pre_ndvi, cmap=cmap, norm=norm, transform=myCRS, extent=extent)
-#h = ax2.imshow(dndvi, cmap='Greys', vmin=-1, vmax=1, transform=myCRS, extent=extent)
-h = ax2.imshow(dnbr2, cmap=cmap, norm=norm, transform=myCRS, extent=extent)
+h = ax2.imshow(dndvi, cmap='Greys', vmin=-1, vmax=1, transform=myCRS, extent=extent)
+#h = ax2.imshow(dnbr2, cmap=cmap, norm=norm, transform=myCRS, extent=extent)
 # save the figure
 fig.savefig('output_maps/dnbr_dndvi.png', dpi=300, bbox_inches='tight')
 
