@@ -13,7 +13,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 class SatelliteImg:
 
     # Spectral band mapping data structure for different satellites
-    bands = {'Sentinel': {'Blue': 2, 'Green': 3, 'Red': 4, 'NIR': 8, 'SWIR': 12},
+    bands = {'Sentinel': {'Blue': 2, 'Green': 3, 'Red': 4, 'NIR': 9, 'SWIR': 11, 'SWIR2': 12},
              'Landsat8': {'Blue': 2, 'Green': 3, 'Red': 4}}
 
     def __init__(self, satellite, file_path, date):
@@ -51,7 +51,7 @@ class SatelliteImg:
             # read the spectral bands depending on satellite
             bands = self.bands[self.satellite]
             for key, band in bands.items():
-                self.img[key] = dataset.read(band)
+                self.img[key] = dataset.read(band).astype(np.float32)
 
             xmin, ymin, xmax, ymax = dataset.bounds
             self.extent = [xmin, xmax, ymin, ymax]
@@ -59,31 +59,35 @@ class SatelliteImg:
         # Delete temp file
         os.remove(self.file_path)
 
-    '''
-    TODO: write docstring
-    NBR = (NIR - SWIR)/(NIR + SWIR)
-    '''
     def nbr(self):
+        '''
+        TODO: write docstring
+        Normalized Burn Ratio
+        NBR = (NIR - SWIR2)/(NIR + SWIR2)
+        '''
         # Suppressing runtime warning for division by zero
         np.seterr(divide='ignore', invalid='ignore')
-        nbr = (self.img['NIR'].astype(int) - self.img['SWIR'].astype(int)) / (self.img['NIR'].astype(int) + self.img['SWIR'].astype(int))
+        return (self.img['NIR'] - self.img['SWIR2']) / (self.img['NIR'] + self.img['SWIR2'])
 
-        # Replace NaN with 0
-        np.nan_to_num(nbr, copy=False, nan=0)
-        return nbr
-
-    '''
-    TODO: write docstring
-    NBR = (NIR - RED)/(NIR + RED)
-    '''
     def ndvi(self):
+        '''
+        TODO: write docstring
+        Normalized Difference Vegetation Index
+        NDVI = (NIR - RED)/(NIR + RED)
+        '''
         # Suppressing runtime warning for division by zero
         np.seterr(divide='ignore', invalid='ignore')
-        ndvi = (self.img['NIR'].astype(int) - self.img['Red'].astype(int)) / (self.img['NIR'].astype(int) + self.img['Red'].astype(int))
+        return (self.img['NIR'] - self.img['Red']) / (self.img['NIR'] + self.img['Red'])
 
-        # Replace NaN with 0
-        np.nan_to_num(ndvi, copy=False, nan=0)
-        return ndvi
+    def ndmi(self):
+        '''
+        TODO: write docstring
+        Normalized Difference Moisture Index
+        NDVI = (NIR - SWIR)/(NIR + SWIR)
+        '''
+        # Suppressing runtime warning for division by zero
+        np.seterr(divide='ignore', invalid='ignore')
+        return (self.img['NIR'] - self.img['SWIR']) / (self.img['SWIR'] + self.img['Red'])
 
     def get_extent(self):
         return self.extent
@@ -96,6 +100,9 @@ class SatelliteImg:
             print(key)
 
 def generate_handles(labels, colors, edge='k', alpha=1):
+    '''
+    TODO: This is where you should write a docstring.
+    '''
     lc = len(colors)  # get the length of the color list
     handles = []
     for i in range(len(labels)):
@@ -104,7 +111,7 @@ def generate_handles(labels, colors, edge='k', alpha=1):
 
 def img_display(image, ax, bands, transform, extent):
     '''
-    This is where you should write a docstring.
+    TODO: This is where you should write a docstring.
     '''
     # first, we transpose the image to re-order the indices
     dispimg = image.transpose([1, 2, 0])
@@ -117,6 +124,8 @@ def img_display(image, ax, bands, transform, extent):
 
     return handle, ax
 
+# Load data and calculate spectral indices
+# -------------------------------------------------------------------------------------#
 pre_fire = SatelliteImg('Sentinel', 'data_files/karbole_sentinel2_june26.img', '2018-06-26')
 pre_fire.load_band_data('data_files/outline.shp')
 
@@ -131,49 +140,58 @@ pre_ndvi = pre_fire.ndvi()
 post_ndvi = post_fire.ndvi()
 dndvi = pre_ndvi - post_ndvi
 
-pre_fire.description()
-post_fire.description()
+pre_ndmi = pre_fire.ndmi()
+post_ndmi = post_fire.ndmi()
 
 extent = pre_fire.get_extent()
 
-myCRS = ccrs.UTM(33) # note that this matches with the CRS of our image
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 10), subplot_kw=dict(projection=myCRS))
+# Plotting
+# --------------------------------------------------------------------------------------- #
+myCRS = ccrs.UTM(33) # TODO: this should match with the CRS of our image
+fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(20, 16), subplot_kw=dict(projection=myCRS))
 
-# Set colors for plotting and classes
+h = ax1.imshow(pre_ndmi, cmap='PuBuGn')
+fig.colorbar(h, ax=ax1)
+ax1.set_title("Pre Fire NDMI")
+h = ax2.imshow(post_ndmi, cmap='PuBuGn')
+fig.colorbar(h, ax=ax2)
+ax2.set_title("Post Fire NDMI")
+h = ax3.imshow(pre_ndvi, cmap='RdYlGn')
+fig.colorbar(h, ax=ax3)
+ax3.set_title("Pre Fire NDVI")
+h = ax4.imshow(post_ndvi, cmap='RdYlGn')
+fig.colorbar(h, ax=ax4)
+ax4.set_title("Post Fire NDVI")
+
+# Save the figure
+fig.savefig('output_maps/ndmi_ndvi.png', dpi=300, bbox_inches='tight')
+
+# Set colors for plotting and classes for dNBR
+fig, ax = plt.subplots(1, 1, figsize=(10, 10), subplot_kw=dict(projection=myCRS))
+
 cmap = matplotlib.colors.ListedColormap(['green','yellow','orange','red','purple'])
-cmap.set_over('purple')
-cmap.set_under('white')
-bounds = [-0.5, 0.1, 0.27, 0.440, 0.660, 1.3] # dNBR threshold values as defined by UN-Spider
+cmap.set_over('purple') # sets the color for high out-of-range values
+cmap.set_under('white') # sets the color for low out-of-range values
+bounds = [-0.5, 0.1, 0.27, 0.440, 0.660, 1.3] # dNBR threshold values as defined by UN-SPIDER
 norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
-ax1.set_title('dNBR')
-ax2.set_title('dNDVI')
 
-# Legend
-labels = ['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity']
-colors = ['green','yellow','orange','red','purple']
-handles = generate_handles(labels, colors)
-ax1.legend(handles, labels, fontsize=6, loc='lower left', framealpha=1)
-
-# Plot
-#h, ax = img_display(img, ax, [12,8,3], myCRS, [xmin, xmax, ymin, ymax])
-h = ax1.imshow(dnbr, cmap=cmap, norm=norm, transform=myCRS, extent=extent)
+# Another (more elaborate) way of creating the color bar
 #divider = make_axes_locatable(ax)
 #cax = divider.append_axes("right", size="5%", pad=0.1, axes_class=plt.Axes)
-#fig.colorbar(h, cax=cax, label='NBR')
-
 #cbar = fig.colorbar(h, ax=ax, fraction=0.035, pad=0.04, ticks=[-0.2, 0.18, 0.35, 0.53, 1])
 #cbar.ax.set_yticklabels(['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity'])
 
-bounds = [-0.1, 0.1, 0.2, 0.3, 0.5, 0.9] # dNBR threshold values as defined by UN-Spider
-norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
-#h = ax2.imshow(pre_ndvi, cmap=cmap, norm=norm, transform=myCRS, extent=extent)
-h = ax2.imshow(dndvi, cmap='Greys', vmin=-1, vmax=1, transform=myCRS, extent=extent)
-#h = ax2.imshow(dnbr2, cmap=cmap, norm=norm, transform=myCRS, extent=extent)
-# save the figure
-fig.savefig('output_maps/dnbr_dndvi.png', dpi=300, bbox_inches='tight')
+# Legend
+labels = ['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity']
+colors = ['green', 'yellow', 'orange', 'red', 'purple']
+handles = generate_handles(labels, colors)
+ax.legend(handles, labels, fontsize=10, loc='lower left', framealpha=1)
 
-# save the figure
-#fig.savefig('output_maps/dndvi.png', dpi=300, bbox_inches='tight')
+h = ax.imshow(dnbr, cmap=cmap, norm=norm, transform=myCRS)
+ax1.set_title("dNBR")
+
+# Save the dNBR map
+fig.savefig('output_maps/dnbr.png', dpi=300, bbox_inches='tight')
 
 
 
