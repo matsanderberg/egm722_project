@@ -1,11 +1,16 @@
 import numpy as np
 import rasterio as rio
 import rasterio.mask as mask
+import rasterio.features
 import geopandas as gpd
 import cartopy.crs as ccrs
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from sklearn import metrics
+from scipy.cluster.vq import *
+from sklearn.metrics import mean_squared_error
+from sklearn.ensemble import RandomForestClassifier
 import os
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 #import earthpy.plot as ep
@@ -20,7 +25,10 @@ class SatelliteImg:
         self.satellite = satellite
         self.file_path = file_path
         self.date = date
+        self.crs = ""
+        self.transform = ""
         self.img = {}
+        self.bands_data = []
         self.extent = []
 
     def load_band_data(self, outline_fp=None):
@@ -48,10 +56,18 @@ class SatelliteImg:
 
         # Load the bands depending on satellite
         with rio.open(self.file_path) as dataset:
+            self.crs = dataset.crs
+            self.transform = dataset.transform
             # read the spectral bands depending on satellite
             bands = self.bands[self.satellite]
             for key, band in bands.items():
                 self.img[key] = dataset.read(band).astype(np.float32)
+
+            # read all the bands
+            self.bands_data = dataset.read().astype(np.float32)
+            #for b in range(1, dataset.count + 1):
+            #    band = dataset.read(b).astype(np.float32)
+            #    self.bands_data.append(band)
 
             xmin, ymin, xmax, ymax = dataset.bounds
             self.extent = [xmin, xmax, ymin, ymax]
@@ -194,5 +210,59 @@ ax1.set_title("dNBR")
 fig.savefig('output_maps/dnbr.png', dpi=300, bbox_inches='tight')
 
 
+# Supervised Learning with Random Forest
+# Based on tutorial from: https://adaneon.com/image-analysis-tutorials/pages/part_four.html
+# -------------------------------
 
+# Load data
+dataset = SatelliteImg('Sentinel', 'data_files/karbole_sentinel2_aug2.img', '2018-08-23')
+dataset.load_band_data('data_files/outline.shp')
+training_data = gpd.read_file('data_files/burn_training.shp').to_crs(dataset.crs)
 
+n_bands, rows, cols = dataset.bands_data.shape
+classes = training_data['Classname'].unique()
+
+shapes = list(zip(training_data['geometry'], training_data['Classvalue']))
+labeled_pixels = rio.features.rasterize(shapes=shapes, out_shape=(rows, cols), fill=0, transform=dataset.transform)
+
+fig = plt.figure()
+plt.imshow(labeled_pixels) # visualize the rasterized output
+fig.savefig('output_maps/training_data.png', dpi=300, bbox_inches='tight')
+
+# Return non-zero values
+is_train = np.nonzero(labeled_pixels)
+
+# Get label and sample data
+training_labels = labeled_pixels[is_train]
+bands_data = np.dstack(dataset.bands_data)
+training_samples = bands_data[is_train]
+
+print("The three classes are: " + str(classes))
+print("Total number of training labels: " + str(training_labels.size))
+print("Total number of training sample size: " + str(training_samples.size))
+
+#Dispatch computation on all the CPUs
+classifier = RandomForestClassifier(n_jobs=-1)
+
+# Fit the classifier
+classifier.fit(training_samples, training_labels)
+
+# Resampling size
+n_samples = rows*cols
+
+# Reshape the dimension
+flat_pixels = bands_data.reshape((n_samples, n_bands))
+
+# Make prediction
+result = classifier.predict(flat_pixels)
+
+# Reshape output two dimension
+classification = result.reshape((rows, cols))
+
+fig, (ax1, ax2) = plt.subplots(1,2, figsize =(18,15), subplot_kw=dict(projection=myCRS))
+print(dataset.bands_data.shape)
+#ax1.imshow(dataset.bands_data[4, 3, 2], transform=myCRS, extent=extent)
+img_display(dataset.bands_data, ax1, [7,3,2], myCRS, extent)
+ax2.imshow(classification, transform=myCRS, extent=extent)
+
+fig.savefig('output_maps/classification.png', dpi=300, bbox_inches='tight')
