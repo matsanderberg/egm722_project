@@ -1,11 +1,16 @@
 import numpy as np
 import rasterio as rio
 import rasterio.mask as mask
+import rasterio.features
 import geopandas as gpd
 import cartopy.crs as ccrs
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from sklearn import metrics
+from scipy.cluster.vq import *
+from sklearn.metrics import mean_squared_error
+from sklearn.ensemble import RandomForestClassifier
 import os
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 #import earthpy.plot as ep
@@ -20,17 +25,18 @@ class SatelliteImg:
         self.satellite = satellite
         self.file_path = file_path
         self.date = date
+        self.crs = ""
+        self.transform = ""
         self.img = {}
+        self.bands_data = []
         self.extent = []
 
     def load_band_data(self, outline_fp=None):
         # Crop image to outline if provided
         if outline_fp is not None:
-            outline = gpd.read_file(outline_fp)
-            outline = outline.to_crs(epsg=32633)  # TODO: should match the dataset
-
             with rio.open(self.file_path) as src:
                 try:
+                    outline = gpd.read_file(outline_fp).to_crs(src.crs)
                     out_image, out_transform = mask.mask(src, outline['geometry'], crop=True)
                 except ValueError:
                     print(f"No overlap found for {src.files[0]}.")
@@ -48,15 +54,21 @@ class SatelliteImg:
 
         # Load the bands depending on satellite
         with rio.open(self.file_path) as dataset:
-            # read the spectral bands depending on satellite
+            self.crs = dataset.crs
+            self.transform = dataset.transform
+
+            # Load selected spectral bands depending on satellite
             bands = self.bands[self.satellite]
             for key, band in bands.items():
                 self.img[key] = dataset.read(band).astype(np.float32)
 
+            # Load all the bands
+            self.bands_data = dataset.read().astype(np.float32)
+
             xmin, ymin, xmax, ymax = dataset.bounds
             self.extent = [xmin, xmax, ymin, ymax]
 
-        # Delete temp file
+        # Delete temp cropped file
         os.remove(self.file_path)
 
     def nbr(self):
@@ -123,6 +135,73 @@ def img_display(image, ax, bands, transform, extent):
     handle = ax.imshow(dispimg[:, :, bands], transform=transform, extent=extent)
 
     return handle, ax
+
+def reclassify_dbnr(dbnr):
+    '''
+    TODO: This is where you should write a docstring.
+    Reclassifies the dnbr to burned or unburned
+    '''
+    reclassified_dnbr = np.zeros((dnbr.shape[0], dnbr.shape[1]))
+    for i in range(0, dnbr.shape[0]):
+        for j in range(0, dnbr.shape[1]):
+            if dnbr[i][j] < 0.1:    # Unburned
+                reclassified_dnbr[i][j] = 2
+            else:                   # Burnt
+                reclassified_dnbr[i][j] = 1
+
+    return reclassified_dnbr
+
+def init_random_forest(dataset, training_data, label):
+    '''
+    TODO: This is where you should write a docstring.
+    Reclassifies the dnbr to burned or unburned
+    '''
+    n_bands, rows, cols = dataset.bands_data.shape
+    #classes = training_data[label].unique()
+
+    shapes = list(zip(training_data['geometry'], training_data[label]))
+    labeled_pixels = rio.features.rasterize(shapes=shapes, out_shape=(rows, cols), fill=0, transform=dataset.transform)
+
+    # Plot the rasterized output
+    fig = plt.figure()
+    plt.imshow(labeled_pixels)
+    fig.savefig('output_maps/training_data.png', dpi=300, bbox_inches='tight')
+
+    # Filter non-zero values
+    is_train = np.nonzero(labeled_pixels)
+
+    # Get label and sample data
+    training_labels = labeled_pixels[is_train]
+    bands_data = np.dstack(dataset.bands_data)
+    training_samples = bands_data[is_train]
+
+    # Dispatch computation on all the CPUs
+    classifier = RandomForestClassifier(n_jobs=-1)
+
+    # Fit the classifier
+    classifier.fit(training_samples, training_labels)
+
+    return classifier
+
+def random_forest(classifier, dataset):
+    '''
+    TODO: This is where you should write a docstring.
+    '''
+    n_bands, rows, cols = dataset.bands_data.shape
+    # Resampling size
+    n_samples = rows * cols
+
+    bands_data = np.dstack(dataset.bands_data)
+    # Reshape the dimension
+    flat_pixels = bands_data.reshape((n_samples, n_bands))
+
+    # Make prediction
+    result = classifier.predict(flat_pixels)
+
+    # Reshape output two dimension
+    classification = result.reshape((rows, cols))
+
+    return classification
 
 # Load data and calculate spectral indices
 # -------------------------------------------------------------------------------------#
@@ -194,5 +273,45 @@ ax1.set_title("dNBR")
 fig.savefig('output_maps/dnbr.png', dpi=300, bbox_inches='tight')
 
 
+# Supervised Learning with Random Forest
+# Based on tutorial from: https://adaneon.com/image-analysis-tutorials/pages/part_four.html
+# ----------------------------------------------------------------------------------------
 
+# Load data
+dataset = SatelliteImg('Sentinel', 'data_files/karbole_sentinel2_aug2.img', '2018-08-23')
+dataset.load_band_data('data_files/outline.shp')
+training_data = gpd.read_file('data_files/burn_training.shp').to_crs(dataset.crs)
 
+classifier = init_random_forest(dataset, training_data, 'Classvalue')
+classification = random_forest(classifier, dataset)
+
+#print("The three classes are: " + str(classes))
+#print("Total number of training labels: " + str(training_labels.size))
+#print("Total number of training sample size: " + str(training_samples.size))
+
+# Plot classification image and source RGB
+fig, (ax1, ax2) = plt.subplots(1,2, figsize =(18,15), subplot_kw=dict(projection=myCRS))
+print(dataset.bands_data.shape)
+#ax1.imshow(dataset.bands_data[4, 3, 2], transform=myCRS, extent=extent)
+img_display(dataset.bands_data, ax1, [7, 3, 2], myCRS, extent)
+ax2.imshow(classification, transform=myCRS, extent=extent)
+fig.savefig('output_maps/classification.png', dpi=300, bbox_inches='tight')
+
+# Calculate size of area and compare to dNBR
+burned = classification[classification == 1]
+burned_size = (burned.size*20*20)/1000000
+unburned = classification[classification == 2]
+water = classification[classification == 3]
+unburned_size = ((water.size + unburned.size)*20*20)/1000000
+print("With Random Forest classification")
+print("Burned area (km2): " + str(burned_size))
+print("Unburned area (km2): " + str(unburned_size))
+
+reclass_dnbr = reclassify_dbnr(dnbr)
+burned = reclass_dnbr[reclass_dnbr == 1]
+burned_size = (burned.size*20*20)/1000000
+unburned = reclass_dnbr[reclass_dnbr == 2]
+unburned_size = (unburned.size*20*20)/1000000
+print("With dNBR")
+print("Burned area (km2): " + str(burned_size))
+print("Unburned area (km2): " + str(unburned_size))
