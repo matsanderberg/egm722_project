@@ -12,19 +12,20 @@ from scipy.cluster.vq import *
 from sklearn.metrics import mean_squared_error
 from sklearn.ensemble import RandomForestClassifier
 import os
+import sys
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-#import earthpy.plot as ep
+import config as cfg
+import re
+import datetime
+from datetime import date
 
 class SatelliteImg:
 
     # Spectral band mapping data structure for different satellites
-    bands = {'Sentinel': {'Blue': 2, 'Green': 3, 'Red': 4, 'NIR': 9, 'SWIR': 11, 'SWIR2': 12},
-             'Landsat8': {'Blue': 2, 'Green': 3, 'Red': 4}}
+    bands = cfg.bands
 
-    def __init__(self, satellite, file_path, date):
-        self.satellite = satellite
+    def __init__(self, file_path):
         self.file_path = file_path
-        self.date = date
         self.crs = ""
         self.transform = ""
         self.img = {}
@@ -52,15 +53,9 @@ class SatelliteImg:
                         dest.write(out_image)
                         self.file_path = dest.name  # update file path to dataset with cropped image
 
-        # Load the bands depending on satellite
         with rio.open(self.file_path) as dataset:
             self.crs = dataset.crs
             self.transform = dataset.transform
-
-            # Load selected spectral bands depending on satellite
-            bands = self.bands[self.satellite]
-            for key, band in bands.items():
-                self.img[key] = dataset.read(band).astype(np.float32)
 
             # Load all the bands
             self.bands_data = dataset.read().astype(np.float32)
@@ -69,7 +64,7 @@ class SatelliteImg:
             self.extent = [xmin, xmax, ymin, ymax]
 
         # Delete temp cropped file
-        os.remove(self.file_path)
+        os.remove("data_files/cropped_temp.tif")
 
     def nbr(self):
         '''
@@ -79,7 +74,10 @@ class SatelliteImg:
         '''
         # Suppressing runtime warning for division by zero
         np.seterr(divide='ignore', invalid='ignore')
-        return (self.img['NIR'] - self.img['SWIR2']) / (self.img['NIR'] + self.img['SWIR2'])
+
+        nir = self.bands_data[self.bands['NIR']-1]
+        swir2 = self.bands_data[self.bands['SWIR2']-1]
+        return (nir - swir2) / (nir + swir2)
 
     def ndvi(self):
         '''
@@ -89,27 +87,31 @@ class SatelliteImg:
         '''
         # Suppressing runtime warning for division by zero
         np.seterr(divide='ignore', invalid='ignore')
-        return (self.img['NIR'] - self.img['Red']) / (self.img['NIR'] + self.img['Red'])
+
+        nir = self.bands_data[self.bands['NIR'] - 1]
+        red = self.bands_data[self.bands['red'] - 1]
+        return (nir - red) / (nir + red)
 
     def ndmi(self):
         '''
         TODO: write docstring
         Normalized Difference Moisture Index
-        NDVI = (NIR - SWIR)/(NIR + SWIR)
+        NDMI = (NIR - SWIR)/(NIR + SWIR)
         '''
         # Suppressing runtime warning for division by zero
         np.seterr(divide='ignore', invalid='ignore')
-        return (self.img['NIR'] - self.img['SWIR']) / (self.img['SWIR'] + self.img['Red'])
+
+        nir = self.bands_data[self.bands['NIR'] - 1]
+        swir = self.bands_data[self.bands['SWIR'] - 1]
+        return (nir - swir) / (nir + swir)
 
     def get_extent(self):
         return self.extent
 
     def description(self):
         print('Satellite: ' + self.satellite)
-        print('Image size: ' + str(self.img['Blue'].shape))
-        print('Spectral bands: ')
-        for key in self.img.keys():
-            print(key)
+        print('image size (width, height): {} x {}'.format(self.bands_data.width, self.bands_data.height))
+        print('Number of bands: ' + str(self.bands_data.count))
 
 def generate_handles(labels, colors, edge='k', alpha=1):
     '''
@@ -135,6 +137,35 @@ def img_display(image, ax, bands, transform, extent):
     handle = ax.imshow(dispimg[:, :, bands], transform=transform, extent=extent)
 
     return handle, ax
+
+def plot_dnbr(dnbr, date, crs):
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10), subplot_kw=dict(projection=crs))
+
+    # Set colors for plotting and classes for dNBR
+    cmap = matplotlib.colors.ListedColormap(['green', 'yellow', 'orange', 'red', 'purple'])
+    cmap.set_over('purple')  # sets the color for high out-of-range values
+    cmap.set_under('white')  # sets the color for low out-of-range values
+    bounds = [-0.5, 0.1, 0.27, 0.440, 0.660, 1.3]  # dNBR threshold values as defined by UN-SPIDER
+    norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
+
+    # Another (more elaborate) way of creating the color bar
+    # divider = make_axes_locatable(ax)
+    # cax = divider.append_axes("right", size="5%", pad=0.1, axes_class=plt.Axes)
+    # cbar = fig.colorbar(h, ax=ax, fraction=0.035, pad=0.04, ticks=[-0.2, 0.18, 0.35, 0.53, 1])
+    # cbar.ax.set_yticklabels(['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity'])
+
+    # Legend
+    labels = ['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity']
+    colors = ['green', 'yellow', 'orange', 'red', 'purple']
+    handles = generate_handles(labels, colors)
+    ax.legend(handles, labels, fontsize=10, loc='lower left', framealpha=1)
+
+    ax.imshow(dnbr, cmap=cmap, norm=norm, transform=crs)
+    ax.set_title("dNBR")
+
+    # Save the dNBR map
+    # Create result directory
+    fig.savefig('output_maps/dnbr_' + date + '.png', dpi=300, bbox_inches='tight')
 
 def reclassify_dbnr(dbnr):
     '''
@@ -203,18 +234,56 @@ def random_forest(classifier, dataset):
 
     return classification
 
-# Load data and calculate spectral indices
+# dNBR analysis on available data
 # -------------------------------------------------------------------------------------#
-pre_fire = SatelliteImg('Sentinel', 'data_files/karbole_sentinel2_june26.img', '2018-06-26')
-pre_fire.load_band_data('data_files/outline.shp')
+postfire_rasters = []
+prefire_raster = ''
+files = []
+fire_boundary = None
+crs = ccrs.UTM(33) # TODO: this should match with the CRS of our image
 
-post_fire = SatelliteImg('Sentinel', 'data_files/karbole_sentinel2_aug2.img', '2018-08-23')
-post_fire.load_band_data('data_files/outline.shp')
+# Iterate the data directory specified in config.py and extract the needed files
+try:
+    files = os.listdir(cfg.data_dir)
+except FileNotFoundError:
+    sys.exit("No files found in the filepath specified by config.py")
 
-pre_nbr = pre_fire.nbr()
-post_nbr = post_fire.nbr()
-dnbr = pre_nbr - post_nbr
+for f in files:
+    if f.endswith('boundary.shp'):
+        fire_boundary = os.path.join(cfg.data_dir, f)
+    elif f.endswith('prefire.img'):
+        prefire_raster = os.path.join(cfg.data_dir, f)
+    else:
+        # Find all post fire rasters. Need to end with 8 digits
+        match = bool(re.search(r'\d{8}.img', f))
+        if match:
+            postfire_rasters.append(os.path.join(cfg.data_dir, f))
 
+# Run the dNBR analysis with the available data (but only of data is available)
+if prefire_raster and postfire_rasters:
+    pre_fire = SatelliteImg(prefire_raster)
+    pre_fire.load_band_data(fire_boundary)
+    pre_nbr = pre_fire.nbr()
+
+    # Loop post fire images
+    for file in postfire_rasters:
+        post_fire = SatelliteImg(file)
+        post_fire.load_band_data(fire_boundary)
+        post_nbr = post_fire.nbr()
+        dnbr = pre_nbr - post_nbr
+
+        # Plot and save data
+        # Todo: date
+        plot_dnbr(dnbr, '20180903', crs)
+
+        # Todo: calculate statistics
+        # Todo: save to datebase?
+else:
+    sys.exit("No data matching the required file pattern found in specified folder.")
+
+
+# Calculating NDVI and NDMI indices pre and post fire
+# --------------------------------------------------------------------------------------- #
 pre_ndvi = pre_fire.ndvi()
 post_ndvi = post_fire.ndvi()
 dndvi = pre_ndvi - post_ndvi
@@ -224,8 +293,6 @@ post_ndmi = post_fire.ndmi()
 
 extent = pre_fire.get_extent()
 
-# Plotting
-# --------------------------------------------------------------------------------------- #
 myCRS = ccrs.UTM(33) # TODO: this should match with the CRS of our image
 fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(20, 16), subplot_kw=dict(projection=myCRS))
 
@@ -245,43 +312,16 @@ ax4.set_title("Post Fire NDVI")
 # Save the figure
 fig.savefig('output_maps/ndmi_ndvi.png', dpi=300, bbox_inches='tight')
 
-# Set colors for plotting and classes for dNBR
-fig, ax = plt.subplots(1, 1, figsize=(10, 10), subplot_kw=dict(projection=myCRS))
-
-cmap = matplotlib.colors.ListedColormap(['green','yellow','orange','red','purple'])
-cmap.set_over('purple') # sets the color for high out-of-range values
-cmap.set_under('white') # sets the color for low out-of-range values
-bounds = [-0.5, 0.1, 0.27, 0.440, 0.660, 1.3] # dNBR threshold values as defined by UN-SPIDER
-norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
-
-# Another (more elaborate) way of creating the color bar
-#divider = make_axes_locatable(ax)
-#cax = divider.append_axes("right", size="5%", pad=0.1, axes_class=plt.Axes)
-#cbar = fig.colorbar(h, ax=ax, fraction=0.035, pad=0.04, ticks=[-0.2, 0.18, 0.35, 0.53, 1])
-#cbar.ax.set_yticklabels(['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity'])
-
-# Legend
-labels = ['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity']
-colors = ['green', 'yellow', 'orange', 'red', 'purple']
-handles = generate_handles(labels, colors)
-ax.legend(handles, labels, fontsize=10, loc='lower left', framealpha=1)
-
-h = ax.imshow(dnbr, cmap=cmap, norm=norm, transform=myCRS)
-ax1.set_title("dNBR")
-
-# Save the dNBR map
-fig.savefig('output_maps/dnbr.png', dpi=300, bbox_inches='tight')
-
-
 # Supervised Learning with Random Forest
 # Based on tutorial from: https://adaneon.com/image-analysis-tutorials/pages/part_four.html
 # ----------------------------------------------------------------------------------------
 
 # Load data
-dataset = SatelliteImg('Sentinel', 'data_files/karbole_sentinel2_aug2.img', '2018-08-23')
-dataset.load_band_data('data_files/outline.shp')
-training_data = gpd.read_file('data_files/burn_training.shp').to_crs(dataset.crs)
+dataset = SatelliteImg('data_files/karbole_sentinel2_20180802.img')
+dataset.load_band_data('data_files/fire_boundary.shp')
+training_data = gpd.read_file('data_files/training_data.shp').to_crs(dataset.crs)
 
+# Initialize and run the classifier
 classifier = init_random_forest(dataset, training_data, 'Classvalue')
 classification = random_forest(classifier, dataset)
 
@@ -291,8 +331,6 @@ classification = random_forest(classifier, dataset)
 
 # Plot classification image and source RGB
 fig, (ax1, ax2) = plt.subplots(1,2, figsize =(18,15), subplot_kw=dict(projection=myCRS))
-print(dataset.bands_data.shape)
-#ax1.imshow(dataset.bands_data[4, 3, 2], transform=myCRS, extent=extent)
 img_display(dataset.bands_data, ax1, [7, 3, 2], myCRS, extent)
 ax2.imshow(classification, transform=myCRS, extent=extent)
 fig.savefig('output_maps/classification.png', dpi=300, bbox_inches='tight')
