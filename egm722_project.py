@@ -12,6 +12,7 @@ from scipy.cluster.vq import *
 from sklearn.metrics import mean_squared_error
 from sklearn.ensemble import RandomForestClassifier
 import os
+import sys
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import config as cfg
 import re
@@ -21,14 +22,10 @@ from datetime import date
 class SatelliteImg:
 
     # Spectral band mapping data structure for different satellites
-    #bands = cfg.bands
-    bands = {'Sentinel': {'Blue': 2, 'Green': 3, 'Red': 4, 'NIR': 9, 'SWIR': 11, 'SWIR2': 12},
-             'Landsat8': {'Blue': 2, 'Green': 3, 'Red': 4}}
+    bands = cfg.bands
 
     def __init__(self, file_path):
-        #self.satellite = satellite
         self.file_path = file_path
-        #self.date = date
         self.crs = ""
         self.transform = ""
         self.img = {}
@@ -56,15 +53,9 @@ class SatelliteImg:
                         dest.write(out_image)
                         self.file_path = dest.name  # update file path to dataset with cropped image
 
-        # Load the bands depending on satellite
         with rio.open(self.file_path) as dataset:
             self.crs = dataset.crs
             self.transform = dataset.transform
-
-            # Load selected spectral bands depending on satellite
-            bands = self.bands['Sentinel']
-            for key, band in bands.items():
-                self.img[key] = dataset.read(band).astype(np.float32)
 
             # Load all the bands
             self.bands_data = dataset.read().astype(np.float32)
@@ -73,7 +64,7 @@ class SatelliteImg:
             self.extent = [xmin, xmax, ymin, ymax]
 
         # Delete temp cropped file
-        os.remove(self.file_path)
+        os.remove("data_files/cropped_temp.tif")
 
     def nbr(self):
         '''
@@ -83,7 +74,10 @@ class SatelliteImg:
         '''
         # Suppressing runtime warning for division by zero
         np.seterr(divide='ignore', invalid='ignore')
-        return (self.img['NIR'] - self.img['SWIR2']) / (self.img['NIR'] + self.img['SWIR2'])
+
+        nir = self.bands_data[self.bands['NIR']-1]
+        swir2 = self.bands_data[self.bands['SWIR2']-1]
+        return (nir - swir2) / (nir + swir2)
 
     def ndvi(self):
         '''
@@ -93,27 +87,31 @@ class SatelliteImg:
         '''
         # Suppressing runtime warning for division by zero
         np.seterr(divide='ignore', invalid='ignore')
-        return (self.img['NIR'] - self.img['Red']) / (self.img['NIR'] + self.img['Red'])
+
+        nir = self.bands_data[self.bands['NIR'] - 1]
+        red = self.bands_data[self.bands['red'] - 1]
+        return (nir - red) / (nir + red)
 
     def ndmi(self):
         '''
         TODO: write docstring
         Normalized Difference Moisture Index
-        NDVI = (NIR - SWIR)/(NIR + SWIR)
+        NDMI = (NIR - SWIR)/(NIR + SWIR)
         '''
         # Suppressing runtime warning for division by zero
         np.seterr(divide='ignore', invalid='ignore')
-        return (self.img['NIR'] - self.img['SWIR']) / (self.img['SWIR'] + self.img['Red'])
+
+        nir = self.bands_data[self.bands['NIR'] - 1]
+        swir = self.bands_data[self.bands['SWIR'] - 1]
+        return (nir - swir) / (nir + swir)
 
     def get_extent(self):
         return self.extent
 
     def description(self):
         print('Satellite: ' + self.satellite)
-        print('Image size: ' + str(self.img['Blue'].shape))
-        print('Spectral bands: ')
-        for key in self.img.keys():
-            print(key)
+        print('image size (width, height): {} x {}'.format(self.bands_data.width, self.bands_data.height))
+        print('Number of bands: ' + str(self.bands_data.count))
 
 def generate_handles(labels, colors, edge='k', alpha=1):
     '''
@@ -166,6 +164,7 @@ def plot_dnbr(dnbr, date, crs):
     ax.set_title("dNBR")
 
     # Save the dNBR map
+    # Create result directory
     fig.savefig('output_maps/dnbr_' + date + '.png', dpi=300, bbox_inches='tight')
 
 def reclassify_dbnr(dbnr):
@@ -235,22 +234,27 @@ def random_forest(classifier, dataset):
 
     return classification
 
-# dNBR anaysis on available data
+# dNBR analysis on available data
 # -------------------------------------------------------------------------------------#
 postfire_rasters = []
 prefire_raster = ''
+files = []
 fire_boundary = None
 crs = ccrs.UTM(33) # TODO: this should match with the CRS of our image
 
 # Iterate the data directory specified in config.py and extract the needed files
-files = os.listdir(cfg.data_dir)
+try:
+    files = os.listdir(cfg.data_dir)
+except FileNotFoundError:
+    sys.exit("No files found in the filepath specified by config.py")
+
 for f in files:
     if f.endswith('boundary.shp'):
         fire_boundary = os.path.join(cfg.data_dir, f)
     elif f.endswith('prefire.img'):
         prefire_raster = os.path.join(cfg.data_dir, f)
     else:
-        # Find all post fire rasters
+        # Find all post fire rasters. Need to end with 8 digits
         match = bool(re.search(r'\d{8}.img', f))
         if match:
             postfire_rasters.append(os.path.join(cfg.data_dir, f))
@@ -272,8 +276,10 @@ if prefire_raster and postfire_rasters:
         # Todo: date
         plot_dnbr(dnbr, '20180903', crs)
 
-        # Todo: calculate statisitcs
-        # Todo: save to datebase
+        # Todo: calculate statistics
+        # Todo: save to datebase?
+else:
+    sys.exit("No data matching the required file pattern found in specified folder.")
 
 
 # Calculating NDVI and NDMI indices pre and post fire
@@ -315,6 +321,7 @@ dataset = SatelliteImg('data_files/karbole_sentinel2_20180802.img')
 dataset.load_band_data('data_files/fire_boundary.shp')
 training_data = gpd.read_file('data_files/training_data.shp').to_crs(dataset.crs)
 
+# Initialize and run the classifier
 classifier = init_random_forest(dataset, training_data, 'Classvalue')
 classification = random_forest(classifier, dataset)
 
@@ -324,8 +331,6 @@ classification = random_forest(classifier, dataset)
 
 # Plot classification image and source RGB
 fig, (ax1, ax2) = plt.subplots(1,2, figsize =(18,15), subplot_kw=dict(projection=myCRS))
-print(dataset.bands_data.shape)
-#ax1.imshow(dataset.bands_data[4, 3, 2], transform=myCRS, extent=extent)
 img_display(dataset.bands_data, ax1, [7, 3, 2], myCRS, extent)
 ax2.imshow(classification, transform=myCRS, extent=extent)
 fig.savefig('output_maps/classification.png', dpi=300, bbox_inches='tight')
