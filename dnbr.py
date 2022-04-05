@@ -1,3 +1,8 @@
+import os
+import sys
+import re
+import datetime
+from datetime import date
 import numpy as np
 import rasterio as rio
 import rasterio.mask as mask
@@ -7,38 +12,30 @@ import cartopy.crs as ccrs
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from sklearn import metrics
-from scipy.cluster.vq import *
-from sklearn.metrics import mean_squared_error
 from sklearn.ensemble import RandomForestClassifier
-import os
-import sys
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import config as cfg
-import re
-import datetime
-from datetime import date
 
 class SatelliteImg:
 
     # Spectral band mapping data structure for different satellites
     bands = cfg.bands
 
-    def __init__(self, file_path):
+    def __init__(self, file_path, date):
         self.file_path = file_path
+        self.date = date
         self.crs = ""
         self.transform = ""
-        self.img = {}
         self.bands_data = []
         self.extent = []
 
-    def load_band_data(self, outline_fp=None):
+    def load_band_data(self, fire_boundary=None):
         # Crop image to outline if provided
-        if outline_fp is not None:
+        if fire_boundary is not None:
             with rio.open(self.file_path) as src:
                 try:
-                    outline = gpd.read_file(outline_fp).to_crs(src.crs)
-                    out_image, out_transform = mask.mask(src, outline['geometry'], crop=True)
+                    boundary = gpd.read_file(fire_boundary).to_crs(src.crs)
+                    out_image, out_transform = mask.mask(src, boundary['geometry'], crop=True)
                 except ValueError:
                     print(f"No overlap found for {src.files[0]}.")
                 else:
@@ -105,6 +102,7 @@ class SatelliteImg:
         swir = self.bands_data[self.bands['SWIR'] - 1]
         return (nir - swir) / (nir + swir)
 
+    # TODO: Needed?
     def get_extent(self):
         return self.extent
 
@@ -138,34 +136,40 @@ def img_display(image, ax, bands, transform, extent):
 
     return handle, ax
 
+def dnbr(prefire, postfire):
+    '''
+    TODO: This is where you should write a docstring.
+    '''
+    return prefire.nbr() - postfire.nbr()
+
+def dndvi(prefire, postfire):
+    '''
+    TODO: This is where you should write a docstring.
+    '''
+    return prefire.ndvi() - postfire.ndvi()
+
 def plot_dnbr(dnbr, date, crs):
+    '''
+    TODO: This is where you should write a docstring.
+    '''
     fig, ax = plt.subplots(1, 1, figsize=(10, 10), subplot_kw=dict(projection=crs))
 
     # Set colors for plotting and classes for dNBR
-    cmap = matplotlib.colors.ListedColormap(['green', 'yellow', 'orange', 'red', 'purple'])
-    cmap.set_over('purple')  # sets the color for high out-of-range values
-    cmap.set_under('white')  # sets the color for low out-of-range values
+    cmap = matplotlib.colors.ListedColormap(cfg.colors)
     bounds = [-0.5, 0.1, 0.27, 0.440, 0.660, 1.3]  # dNBR threshold values as defined by UN-SPIDER
     norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
 
-    # Another (more elaborate) way of creating the color bar
-    # divider = make_axes_locatable(ax)
-    # cax = divider.append_axes("right", size="5%", pad=0.1, axes_class=plt.Axes)
-    # cbar = fig.colorbar(h, ax=ax, fraction=0.035, pad=0.04, ticks=[-0.2, 0.18, 0.35, 0.53, 1])
-    # cbar.ax.set_yticklabels(['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity'])
-
     # Legend
-    labels = ['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity']
-    colors = ['green', 'yellow', 'orange', 'red', 'purple']
-    handles = generate_handles(labels, colors)
+    labels = cfg.labels
+    handles = generate_handles(labels, cfg.colors)
     ax.legend(handles, labels, fontsize=10, loc='lower left', framealpha=1)
 
     ax.imshow(dnbr, cmap=cmap, norm=norm, transform=crs)
-    ax.set_title("dNBR")
+    ax.set_title("dNBR " + cfg.name + ", Date: " + str(date))
 
     # Save the dNBR map
-    # Create result directory
-    fig.savefig('output_maps/dnbr_' + date + '.png', dpi=300, bbox_inches='tight')
+    # Todo: Create result directory
+    fig.savefig('output_maps/dnbr_' + str(date) + '.png', dpi=300, bbox_inches='tight')
 
 def reclassify_dbnr(dbnr):
     '''
@@ -234,122 +238,36 @@ def random_forest(classifier, dataset):
 
     return classification
 
-# dNBR analysis on available data
-# -------------------------------------------------------------------------------------#
-postfire_rasters = []
-prefire_raster = ''
-files = []
-fire_boundary = None
-crs = ccrs.UTM(33) # TODO: this should match with the CRS of our image
+def load_satellite_imgs():
+    '''
+    TODO: This is where you should write a docstring.
+    '''
+    images = []
+    fire_boundary = None
 
-# Iterate the data directory specified in config.py and extract the needed files
-try:
-    files = os.listdir(cfg.data_dir)
-except FileNotFoundError:
-    sys.exit("No files found in the filepath specified by config.py")
+    # Get files from data directory specified in config.py
+    try:
+        files = os.listdir(cfg.data_dir)
+    except FileNotFoundError:
+        sys.exit("No files found in the filepath specified by config.py")
 
-for f in files:
-    if f.endswith('boundary.shp'):
-        fire_boundary = os.path.join(cfg.data_dir, f)
-    elif f.endswith('prefire.img'):
-        prefire_raster = os.path.join(cfg.data_dir, f)
-    else:
-        # Find all post fire rasters. Need to end with 8 digits
-        match = bool(re.search(r'\d{8}.img', f))
-        if match:
-            postfire_rasters.append(os.path.join(cfg.data_dir, f))
+    # Iterate the files and find boundary shape file and all satellite images
+    # Instantiate an SatelliteImg object for each image and load band date
+    for f in files:
+        if f.endswith('boundary.shp'):
+            fire_boundary = os.path.join(cfg.data_dir, f)
+        elif f.endswith('.img'):
+            # Find all post fire rasters. Should end with 8 digits defining the date
+            match = re.search(r'\d{4}\d{2}\d{2}', f)
+            if bool(match):
+                date = datetime.datetime.strptime(match.group(), '%Y%m%d').date()
+                img = SatelliteImg(os.path.join(cfg.data_dir, f), date)
+                img.load_band_data(fire_boundary)
+                images.append(img)
 
-# Run the dNBR analysis with the available data (but only of data is available)
-if prefire_raster and postfire_rasters:
-    pre_fire = SatelliteImg(prefire_raster)
-    pre_fire.load_band_data(fire_boundary)
-    pre_nbr = pre_fire.nbr()
-
-    # Loop post fire images
-    for file in postfire_rasters:
-        post_fire = SatelliteImg(file)
-        post_fire.load_band_data(fire_boundary)
-        post_nbr = post_fire.nbr()
-        dnbr = pre_nbr - post_nbr
-
-        # Plot and save data
-        # Todo: date
-        plot_dnbr(dnbr, '20180903', crs)
-
-        # Todo: calculate statistics
-        # Todo: save to datebase?
-else:
-    sys.exit("No data matching the required file pattern found in specified folder.")
+    return images
 
 
-# Calculating NDVI and NDMI indices pre and post fire
-# --------------------------------------------------------------------------------------- #
-pre_ndvi = pre_fire.ndvi()
-post_ndvi = post_fire.ndvi()
-dndvi = pre_ndvi - post_ndvi
 
-pre_ndmi = pre_fire.ndmi()
-post_ndmi = post_fire.ndmi()
 
-extent = pre_fire.get_extent()
 
-myCRS = ccrs.UTM(33) # TODO: this should match with the CRS of our image
-fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(20, 16), subplot_kw=dict(projection=myCRS))
-
-h = ax1.imshow(pre_ndmi, cmap='PuBuGn')
-fig.colorbar(h, ax=ax1)
-ax1.set_title("Pre Fire NDMI")
-h = ax2.imshow(post_ndmi, cmap='PuBuGn')
-fig.colorbar(h, ax=ax2)
-ax2.set_title("Post Fire NDMI")
-h = ax3.imshow(pre_ndvi, cmap='RdYlGn')
-fig.colorbar(h, ax=ax3)
-ax3.set_title("Pre Fire NDVI")
-h = ax4.imshow(post_ndvi, cmap='RdYlGn')
-fig.colorbar(h, ax=ax4)
-ax4.set_title("Post Fire NDVI")
-
-# Save the figure
-fig.savefig('output_maps/ndmi_ndvi.png', dpi=300, bbox_inches='tight')
-
-# Supervised Learning with Random Forest
-# Based on tutorial from: https://adaneon.com/image-analysis-tutorials/pages/part_four.html
-# ----------------------------------------------------------------------------------------
-
-# Load data
-dataset = SatelliteImg('data_files/karbole_sentinel2_20180802.img')
-dataset.load_band_data('data_files/fire_boundary.shp')
-training_data = gpd.read_file('data_files/training_data.shp').to_crs(dataset.crs)
-
-# Initialize and run the classifier
-classifier = init_random_forest(dataset, training_data, 'Classvalue')
-classification = random_forest(classifier, dataset)
-
-#print("The three classes are: " + str(classes))
-#print("Total number of training labels: " + str(training_labels.size))
-#print("Total number of training sample size: " + str(training_samples.size))
-
-# Plot classification image and source RGB
-fig, (ax1, ax2) = plt.subplots(1,2, figsize =(18,15), subplot_kw=dict(projection=myCRS))
-img_display(dataset.bands_data, ax1, [7, 3, 2], myCRS, extent)
-ax2.imshow(classification, transform=myCRS, extent=extent)
-fig.savefig('output_maps/classification.png', dpi=300, bbox_inches='tight')
-
-# Calculate size of area and compare to dNBR
-burned = classification[classification == 1]
-burned_size = (burned.size*20*20)/1000000
-unburned = classification[classification == 2]
-water = classification[classification == 3]
-unburned_size = ((water.size + unburned.size)*20*20)/1000000
-print("With Random Forest classification")
-print("Burned area (km2): " + str(burned_size))
-print("Unburned area (km2): " + str(unburned_size))
-
-reclass_dnbr = reclassify_dbnr(dnbr)
-burned = reclass_dnbr[reclass_dnbr == 1]
-burned_size = (burned.size*20*20)/1000000
-unburned = reclass_dnbr[reclass_dnbr == 2]
-unburned_size = (unburned.size*20*20)/1000000
-print("With dNBR")
-print("Burned area (km2): " + str(burned_size))
-print("Unburned area (km2): " + str(unburned_size))
