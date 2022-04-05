@@ -16,7 +16,7 @@ Once you have these installed, __clone__ this repository to your computer by doi
 
 ## 3. Create a conda environment
 
-Once you have successfully cloned the repository, you can then create a `conda` environment to work through the exercises.
+Once you have successfully cloned the repository, you can then create a `conda` environment to use the code.
 
 To do this, use the environment.yml file provided in the repository. If you have Anaconda Navigator installed,
 you can do this by selecting __Import__ from the bottom of the __Environments__ panel. 
