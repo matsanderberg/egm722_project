@@ -17,8 +17,21 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import config as cfg
 
 class SatelliteImg:
+    '''
+    SatelliteImg holds the band data for a given satellite image and has methods to
+    calculate different spectral indices.
 
-    # Spectral band mapping data structure for different satellites
+    Attributes:
+        file_path: string holding the path to the satellite image
+        date: the date of the image.
+        TODO: remove these?
+        crs: string for the coordinate referense system for the image. Updated when load_band_data is called
+        transform: string for the transform of the image. Updated when load_band_data is called
+        bands_data: a 3D list holding the band date for each band. Updated when load_band_data is called
+        extent: a list holding the extent of the image (width, height)
+    '''
+
+    # Spectral band mapping depending on satellite
     bands = cfg.bands
 
     def __init__(self, file_path, date):
@@ -30,6 +43,13 @@ class SatelliteImg:
         self.extent = []
 
     def load_band_data(self, fire_boundary=None):
+        '''
+        Loads all band data into a 3D list. If a boundary shape file is provided the
+        function will crop the image to that extent.
+
+        Args:
+            fire_boundary: file path to boundary shape file
+        '''
         # Crop image to outline if provided
         if fire_boundary is not None:
             with rio.open(self.file_path) as src:
@@ -56,19 +76,25 @@ class SatelliteImg:
 
             # Load all the bands
             self.bands_data = dataset.read().astype(np.float32)
+            print("Image loaded:")
+            print(self.description())
 
             xmin, ymin, xmax, ymax = dataset.bounds
             self.extent = [xmin, xmax, ymin, ymax]
 
         # Delete temp cropped file
-        os.remove("data_files/cropped_temp.tif")
+        if os.path.exists(cfg.data_dir + "cropped_temp.tif"):
+            os.remove(cfg.data_dir + "cropped_temp.tif")
 
     def nbr(self):
         '''
-        TODO: write docstring
-        Normalized Burn Ratio
+        Calculates the Normalized Burn Ratio (NBR) as
         NBR = (NIR - SWIR2)/(NIR + SWIR2)
+
+        Returns:
+            A list with NBR values for the satellite image
         '''
+        print("Calculating NBR for " + self.file_path);
         # Suppressing runtime warning for division by zero
         np.seterr(divide='ignore', invalid='ignore')
 
@@ -78,9 +104,11 @@ class SatelliteImg:
 
     def ndvi(self):
         '''
-        TODO: write docstring
-        Normalized Difference Vegetation Index
+        Calculates the Normalized Difference Vegetation Index (NDVI) as
         NDVI = (NIR - RED)/(NIR + RED)
+
+        Returns:
+            A list with NDVI values for the satellite image
         '''
         # Suppressing runtime warning for division by zero
         np.seterr(divide='ignore', invalid='ignore')
@@ -91,9 +119,11 @@ class SatelliteImg:
 
     def ndmi(self):
         '''
-        TODO: write docstring
-        Normalized Difference Moisture Index
+        Calculates the Normalized Difference Moisture Index (NDMI) as
         NDMI = (NIR - SWIR)/(NIR + SWIR)
+
+        Returns:
+            A list with NDVI values for the satellite image
         '''
         # Suppressing runtime warning for division by zero
         np.seterr(divide='ignore', invalid='ignore')
@@ -102,18 +132,32 @@ class SatelliteImg:
         swir = self.bands_data[self.bands['SWIR'] - 1]
         return (nir - swir) / (nir + swir)
 
-    # TODO: Needed?
     def get_extent(self):
+        '''
+        Returns: extent of satellite image as a list [width, height]
+        '''
         return self.extent
 
     def description(self):
-        print('Satellite: ' + self.satellite)
-        print('image size (width, height): {} x {}'.format(self.bands_data.width, self.bands_data.height))
-        print('Number of bands: ' + str(self.bands_data.count))
+        '''
+        Prints a description of the satellite image
+        '''
+        print('Image: ' + self.file_path)
+        print('Date: ' + str(self.date))
+        print('(bands, width, height): ' + str(self.bands_data.shape))
 
 def generate_handles(labels, colors, edge='k', alpha=1):
     '''
-    TODO: This is where you should write a docstring.
+    Generates a list of matplot Rectangle handles for the legend.
+
+    Args:
+        labels: list of label names
+        colors: list of colors
+        edge: edge color. Defaults to k.
+        alpha: blending value, 0-1. Defaults to 1.
+
+    Returns:
+        A list of handles
     '''
     lc = len(colors)  # get the length of the color list
     handles = []
@@ -123,7 +167,18 @@ def generate_handles(labels, colors, edge='k', alpha=1):
 
 def img_display(image, ax, bands, transform, extent):
     '''
-    TODO: This is where you should write a docstring.
+    Plots a scaled satellite image for the given band combination
+
+    Args:
+        image: 3D list for the satellite image to display
+        ax: the matplot axes on which to plot image
+        bands: the band combination to display. E.g. [7,3,2] for a Sentinel 2 IR combination
+        transform: the image transform
+        extent: the image extent
+
+    Returns:
+        handle: the AxesImage object
+        ax: the matplotlib axes
     '''
     # first, we transpose the image to re-order the indices
     dispimg = image.transpose([1, 2, 0])
@@ -138,48 +193,73 @@ def img_display(image, ax, bands, transform, extent):
 
 def dnbr(prefire, postfire):
     '''
-    TODO: This is where you should write a docstring.
+    Takes two SatelliteImg objects and calculates the NBR delta
+
+    Returns:
+        dNBR for the two input images
     '''
     return prefire.nbr() - postfire.nbr()
 
 def dndvi(prefire, postfire):
     '''
-    TODO: This is where you should write a docstring.
+    Takes two SatelliteImg objects and calculates the NDVI delta
+
+    Returns:
+        dNDVI for the two input images
     '''
     return prefire.ndvi() - postfire.ndvi()
 
 def plot_dnbr(dnbr, date, crs):
     '''
-    TODO: This is where you should write a docstring.
+    Plots a burn severity map for DNBR and saves to file (a directory will be created
+    named result in script root directory).
+
+    Args:
+        dnbr: the dNBR to plot
+        date: date to be used in plot title
+        crs: the projection needed for plotting
     '''
-    fig, ax = plt.subplots(1, 1, figsize=(10, 10), subplot_kw=dict(projection=crs))
+    #fig, ax = plt.subplots(1, 1, figsize=(10, 10), subplot_kw=dict(projection=crs))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 12), subplot_kw=dict(projection=crs))
 
     # Set colors for plotting and classes for dNBR
     cmap = matplotlib.colors.ListedColormap(cfg.colors)
-    bounds = [-0.5, 0.1, 0.27, 0.440, 0.660, 1.3]  # dNBR threshold values as defined by UN-SPIDER
+    bounds = cfg.bounds
     norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
 
     # Legend
     labels = cfg.labels
     handles = generate_handles(labels, cfg.colors)
-    ax.legend(handles, labels, fontsize=10, loc='lower left', framealpha=1)
+    ax1.legend(handles, labels, fontsize=10, loc='lower left', framealpha=1)
 
-    ax.imshow(dnbr, cmap=cmap, norm=norm, transform=crs)
-    ax.set_title("dNBR " + cfg.name + ", Date: " + str(date))
+    ax1.imshow(dnbr, cmap=cmap, norm=norm, transform=crs)
+    ax1.set_title("Burn severity map with dNBR " + cfg.name + ", Date: " + str(date))
+
+    # Pie chart for each class of burn severity
+    sizes = [20, 20, 20, 20, 20]
+    data = [234, 4325, 1212, 212, 245]
+
+    ax2.pie(data, autopct='%1.1f%%', labels=labels, colors=cfg.colors)
+    ax2.axis('equal')
 
     # Save the dNBR map
     # Todo: Create result directory
-    fig.savefig('output_maps/dnbr_' + str(date) + '.png', dpi=300, bbox_inches='tight')
+    fig.savefig('output_maps/dnbr_' + cfg.name + '_' + str(date) + '.png', dpi=300, bbox_inches='tight')
 
-def reclassify_dbnr(dbnr):
+def reclassify_dbnr(dbnr, threshold):
     '''
-    TODO: This is where you should write a docstring.
-    Reclassifies the dnbr to burned or unburned
+    Reclassifies the dnbr to either burned or unburned for the given threshold
+
+    Args:
+        threshold: the delimiter value for burned or unburned area
+
+    Returns:
+        The reclassified dNBR
     '''
     reclassified_dnbr = np.zeros((dnbr.shape[0], dnbr.shape[1]))
     for i in range(0, dnbr.shape[0]):
         for j in range(0, dnbr.shape[1]):
-            if dnbr[i][j] < 0.1:    # Unburned
+            if dnbr[i][j] < threshold:    # Unburned
                 reclassified_dnbr[i][j] = 2
             else:                   # Burnt
                 reclassified_dnbr[i][j] = 1
@@ -188,19 +268,22 @@ def reclassify_dbnr(dbnr):
 
 def init_random_forest(dataset, training_data, label):
     '''
-    TODO: This is where you should write a docstring.
-    Reclassifies the dnbr to burned or unburned
-    '''
-    n_bands, rows, cols = dataset.bands_data.shape
-    #classes = training_data[label].unique()
+    Initialises a skitlearn Random Forest classifier
 
+    Args:
+        dataset: the dataset to be classified
+        training_data: data to be used to train the model
+        label: name of label in training data set to be used for labeling
+
+    Return:
+         A Random Forest classifier
+    '''
+    print("Initializing Random Forest Classifier...")
+
+    # Convert training data to labeled raster
+    n_bands, rows, cols = dataset.bands_data.shape
     shapes = list(zip(training_data['geometry'], training_data[label]))
     labeled_pixels = rio.features.rasterize(shapes=shapes, out_shape=(rows, cols), fill=0, transform=dataset.transform)
-
-    # Plot the rasterized output
-    fig = plt.figure()
-    plt.imshow(labeled_pixels)
-    fig.savefig('output_maps/training_data.png', dpi=300, bbox_inches='tight')
 
     # Filter non-zero values
     is_train = np.nonzero(labeled_pixels)
@@ -220,9 +303,13 @@ def init_random_forest(dataset, training_data, label):
 
 def random_forest(classifier, dataset):
     '''
-    TODO: This is where you should write a docstring.
+    Runs a skitlearn Random Forest classifier on a given dataset
+
+    Returns:
+        Classified image
     '''
     n_bands, rows, cols = dataset.bands_data.shape
+
     # Resampling size
     n_samples = rows * cols
 
@@ -240,7 +327,11 @@ def random_forest(classifier, dataset):
 
 def load_satellite_imgs():
     '''
-    TODO: This is where you should write a docstring.
+    Takes all satellite images in the data directory specified in config.py and creates a list of SatelliteIm objects.
+    Images will be cropped by boundary shape file if one exists.
+
+    Returns:
+        List of SatelliteImg objects
     '''
     images = []
     fire_boundary = None
@@ -252,11 +343,11 @@ def load_satellite_imgs():
         sys.exit("No files found in the filepath specified by config.py")
 
     # Iterate the files and find boundary shape file and all satellite images
-    # Instantiate an SatelliteImg object for each image and load band date
+    # Instantiate an SatelliteImg object for each image and load band data
     for f in files:
         if f.endswith('boundary.shp'):
             fire_boundary = os.path.join(cfg.data_dir, f)
-        elif f.endswith('.img'):
+        elif f.endswith('.img') or f.endswith('.tif'):
             # Find all post fire rasters. Should end with 8 digits defining the date
             match = re.search(r'\d{4}\d{2}\d{2}', f)
             if bool(match):

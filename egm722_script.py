@@ -10,18 +10,22 @@ crs = ccrs.UTM(cfg.utm_zone)  # TODO: this should match with the CRS of our imag
 
 # Load all satellite images (as objects of class SatelliteImg) available for analysis into a list
 images = load_satellite_imgs()
-# Sort list of image objects by data. We want to make sure the pre fire raster is at index 0
-images.sort(key=lambda img: img.date)
 
-# Pre fire raster should be the one with the earliest date
-pre_fire = images[0]
-# Calculate the dNBR for all available post fire images and plot
-for post_fire in images[1:]:
-    dnbr = dnbr(pre_fire, post_fire)
-    plot_dnbr(dnbr, post_fire.date, crs)
+if (images):
+    # Sort list of image objects by data. We want to make sure the pre fire raster is at index 0
+    images.sort(key=lambda img: img.date)
 
-# Todo: calculate statistics
-# Todo: save to datebase?
+    # Pre fire raster should be the one with the earliest date
+    pre_fire = images[0]
+    # Calculate the dNBR for all available post fire images and plot
+    for post_fire in images[1:]:
+        dnbr = dnbr(pre_fire, post_fire)
+        plot_dnbr(dnbr, post_fire.date, crs)
+
+    # Todo: calculate statistics
+    # Todo: save to datebase?
+else:
+    print("No valid raster images found. Check your data directory.")
 
 # This examples calculates NDVI and NDMI indices pre and for a given post fire image
 # and plots the on a 2x2 axes
@@ -33,7 +37,7 @@ post_ndvi = images[1].ndvi()
 pre_ndmi = images[0].ndmi()
 post_ndmi = images[1].ndmi()
 
-fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(20, 16), subplot_kw=dict(projection=crs))
+fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(24, 16), subplot_kw=dict(projection=crs))
 
 h = ax1.imshow(pre_ndmi, cmap='PuBuGn')
 fig.colorbar(h, ax=ax1)
@@ -101,7 +105,7 @@ print("With Random Forest classification")
 print("Burned area (km2): " + str(burned_size))
 print("Unburned area (km2): " + str(unburned_size))
 
-#reclass_dnbr = reclassify_dbnr(dnbr)
+#reclass_dnbr = reclassify_dbnr(dnbr, 0.1)
 #burned = reclass_dnbr[reclass_dnbr == 1]
 #burned_size = (burned.size*20*20)/1000000
 #unburned = reclass_dnbr[reclass_dnbr == 2]
