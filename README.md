@@ -27,11 +27,60 @@ to the folder where you cloned this repository and run the following command:
 ```
 C:\Users\matsanderberg> conda env create -f environment.yml
 ```
+## 4. Config.py
 
-## 4. Data files
+The script in will use configurations provided in a python file that should be named config.py. This files should be created and stored in the same folder as satelliteimg.py. The config file defines band numbers (which will depend on satellite), where your datafiles are stored and definitions for map layout (coloring, labels etc). An example is provided below:
 
-## 5. Config.py
+```
+# Friendly name for the wild fire to be analyzed
+name = "Kårböle"
 
-## 6. Example script
+# UTM zone matching the satellite imagery
+utm_zone = 33
+
+# Spectral band mapping (depends on satellite program)
+bands = {'blue': 2, 'green': 3, 'red': 4, 'NIR': 9, 'SWIR': 11, 'SWIR2': 12} # Sentinel-2
+
+# Path to directory of input data files
+data_dir = 'data_files/'
+
+# dBNR thresholds and corresponding colors and labels for plotting. Dimensions must match
+bounds = [-0.5, 0.1, 0.27, 0.440, 0.660, 1.3]  # dNBR threshold values as defined by UN-SPIDER
+labels = ['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity']
+colors = ['green', 'yellow', 'orange', 'red', 'purple']
+```
+
+## 5. Data files
+
+The python script assumes data files are named a certain way. Any satellite image should be either a .tif or .img file and the file name must end with a date on the format YYYYMMDD, e.g. karbole_sentinel2_20180626.img. The script will assume the earliest image to be pre fire and the rest as post fire. At least one pre fire and one post fire should be provided. If the boundary file for the fire is provided the script will first crop images to the extent of the boundary. The boundary file should be in the format of a shape file and end with boundary.shp, e.g. fire_boundary.shp.
+
+## 6. Usage
+
+Provided below is an example how to use the satelliteimg.py to run a dNBR analysis on an arbirtray number of input files (the same code is also available in the repository in the egm_722.py).
+
+```
+from satelliteimg import *
+
+crs = ccrs.UTM(cfg.utm_zone)
+
+# Load all satellite images (as objects of class SatelliteImg) available for analysis into a list
+images = load_satellite_imgs()
+
+if (images):
+    # Sort list of image objects by date. We want to make sure the pre fire raster is at index 0
+    images.sort(key=lambda img: img.date)
+
+    # Pre fire raster should be the one with the earliest date
+    pre_fire = images[0]
+    # Calculate the dNBR for all available post fire images and plot
+    for post_fire in images[1:]:
+        dnbr = dnbr(pre_fire, post_fire)
+        plot_dnbr(dnbr, post_fire.date, crs)
+else:
+    print("No valid raster images found. Check your data directory.")
+```
 
 ## 7. Output
+
+Results from dNBR anaysis using the plot_dnbr function will be stored in a folder Result in the root folder for the script. If it doesn't exist it will be created. 
+
