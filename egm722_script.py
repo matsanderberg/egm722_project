@@ -1,29 +1,26 @@
-# TODO: Header
-#
-#
-#
-#
-
 from dnbr import *
 
-crs = ccrs.UTM(cfg.utm_zone)  # TODO: this should match with the CRS of our image. Can ccrs.epsg be used?
+crs = ccrs.UTM(cfg.utm_zone)
 
 # Load all satellite images (as objects of class SatelliteImg) available for analysis into a list
 images = load_satellite_imgs()
 
 if (images):
-    # Sort list of image objects by data. We want to make sure the pre fire raster is at index 0
+    # Sort list of image objects by date. We want to make sure the pre fire raster is at index 0
     images.sort(key=lambda img: img.date)
 
     # Pre fire raster should be the one with the earliest date
     pre_fire = images[0]
+
+    plot = {"bounds": cfg.bounds,
+            "labels": cfg.labels,
+            "colors": cfg.colors}
     # Calculate the dNBR for all available post fire images and plot
     for post_fire in images[1:]:
         dnbr = dnbr(pre_fire, post_fire)
-        plot_dnbr(dnbr, post_fire.date, crs)
-
-    # Todo: calculate statistics
-    # Todo: save to datebase?
+        plot_burn_severity("dNBR", dnbr, post_fire.date, plot, crs)
+        dndvi = dndvi(pre_fire, post_fire)
+        plot_burn_severity("dNDVI", dndvi, post_fire.date, plot, crs)
 else:
     print("No valid raster images found. Check your data directory.")
 
@@ -55,22 +52,14 @@ ax4.set_title("Post Fire NDVI, " + str(images[1].date))
 # Save the figure
 fig.savefig('output_maps/ndmi_ndvi.png', dpi=300, bbox_inches='tight')
 
-
-# Another (more elaborate) way of creating the color bar
-# divider = make_axes_locatable(ax)
-# cax = divider.append_axes("right", size="5%", pad=0.1, axes_class=plt.Axes)
-# cbar = fig.colorbar(h, ax=ax, fraction=0.035, pad=0.04, ticks=[-0.2, 0.18, 0.35, 0.53, 1])
-# cbar.ax.set_yticklabels(['Unburned', 'Low Severity', 'Moderate-low Severity', 'Moderate-high Severity', 'High Severity'])
-
-
 # Supervised Learning with Random Forest
 # Based on tutorial from: https://adaneon.com/image-analysis-tutorials/pages/part_four.html
 # ----------------------------------------------------------------------------------------
 
 # Load data
-dataset = SatelliteImg('data_files/karbole_sentinel2_20180802.img', '20180802')
-dataset.load_band_data('data_files/fire_boundary.shp')
-training_data = gpd.read_file('data_files/training_data.shp').to_crs(dataset.crs)
+dataset = images[1] #SatelliteImg('data_files/karbole_sentinel2_20180802.img', '20180802')
+#dataset.load_band_data('data_files/fire_boundary.shp')
+training_data = gpd.read_file('data_files/Karbole/training_data.shp').to_crs(dataset.crs)
 extent = dataset.get_extent()
 
 # Initialize and run the classifier
@@ -101,7 +90,7 @@ burned_size = (burned.size*20*20)/1000000
 unburned = classification[classification == 2]
 water = classification[classification == 3]
 unburned_size = ((water.size + unburned.size)*20*20)/1000000
-print("With Random Forest classification")
+print("Classification with Random Forest classification")
 print("Burned area (km2): " + str(burned_size))
 print("Unburned area (km2): " + str(unburned_size))
 
