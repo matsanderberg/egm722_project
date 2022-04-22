@@ -209,62 +209,69 @@ def dndvi(prefire, postfire):
     '''
     return prefire.ndvi() - postfire.ndvi()
 
-def plot_dnbr(dnbr, date, crs):
-    '''
-    Plots a burn severity map for DNBR and saves to file (a directory will be created
-    named result in script root directory).
-
-    Args:
-        dnbr: the dNBR to plot
-        date: date to be used in plot title
-        crs: the projection needed for plotting
-    '''
-    #fig, ax = plt.subplots(1, 1, figsize=(10, 10), subplot_kw=dict(projection=crs))
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 12), subplot_kw=dict(projection=crs))
-
-    # Set colors for plotting and classes for dNBR
-    cmap = matplotlib.colors.ListedColormap(cfg.colors)
-    bounds = cfg.bounds
-    norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
-
-    # Legend
-    labels = cfg.labels
-    handles = generate_handles(labels, cfg.colors)
-    ax1.legend(handles, labels, fontsize=10, loc='lower left', framealpha=1)
-
-    ax1.imshow(dnbr, cmap=cmap, norm=norm, transform=crs)
-    ax1.set_title("Burn severity map with dNBR " + cfg.name + ", Date: " + str(date))
-
-    # Pie chart for each class of burn severity
-    sizes = [20, 20, 20, 20, 20]
-    data = [234, 4325, 1212, 212, 245]
-
-    ax2.pie(data, autopct='%1.1f%%', labels=labels, colors=cfg.colors)
-    ax2.axis('equal')
-
-    # Save the dNBR map
-    # Todo: Create result directory
-    fig.savefig('output_maps/dnbr_' + cfg.name + '_' + str(date) + '.png', dpi=300, bbox_inches='tight')
-
-def reclassify_dbnr(dbnr, threshold):
+def reclassify_dnbr(array, thresholds):
     '''
     Reclassifies the dnbr to either burned or unburned for the given threshold
 
     Args:
-        threshold: the delimiter value for burned or unburned area
+        threshold: the delimiter value for burned vs unburned area
 
     Returns:
         The reclassified dNBR
     '''
-    reclassified_dnbr = np.zeros((dnbr.shape[0], dnbr.shape[1]))
-    for i in range(0, dnbr.shape[0]):
-        for j in range(0, dnbr.shape[1]):
-            if dnbr[i][j] < threshold:    # Unburned
-                reclassified_dnbr[i][j] = 2
-            else:                   # Burnt
-                reclassified_dnbr[i][j] = 1
+    reclassified = np.zeros((array.shape[0], array.shape[1]))
+    for i in range(0, array.shape[0]):
+        for j in range(0, array.shape[1]):
+            for k in range(0, len(thresholds)):
+                if array[i][j] < thresholds[k]:
+                    reclassified[i][j] = k
+                    break
 
-    return reclassified_dnbr
+    return reclassified
+
+def plot_burn_severity(type, img, date, plot, crs):
+    '''
+    Plots a burn severity map and saves to file (a directory will be created
+    named result in script root directory).
+
+    Args:
+        type: type of analysis done as a string (e.g. "dNBR" or "dNDVI")
+        img: the image to plot
+        date: date to be used in plot title
+        plot: dict with arrays providing information about thresholds (bounds) and corresponding labels and colors
+        crs: the projection needed for plotting
+    '''
+    fig, ax = plt.subplots(1, 1, figsize=(20, 16), subplot_kw=dict(projection=crs))
+    ax.set_title("Burn severity map with " + type + ", " + cfg.name + ", " + str(date), fontsize=16)
+
+    labels = plot['labels']
+    bounds = plot['bounds']
+    colors = plot['colors']
+
+    # Set colors for plotting and classes for dNBR
+    cmap = matplotlib.colors.ListedColormap(colors)
+    norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
+
+    # Legend
+    handles = generate_handles(labels, colors)
+    ax.legend(handles, labels, fontsize=10, loc='lower left', framealpha=1)
+
+    ax.imshow(img, cmap=cmap, norm=norm, transform=crs)
+
+    reclass = reclassify_dnbr(img, bounds)
+    area = []
+    for i in range(1, len(bounds)):
+        area.append(str(int(reclass[reclass == i].size*0.0004))) # area in km2
+
+    # Table with area per burn severity
+    area_2d = np.reshape(area, (-1, 1))
+    table = plt.table(cellText=area_2d, rowLabels=labels, rowColours=cfg.colors, colLabels='Area (km2)', loc='bottom')
+    plt.subplots_adjust(left=0.2, bottom=0.2)
+
+    # Save the dNBR map
+    if not os.path.exists('result/'):
+        os.mkdir('result/')
+    fig.savefig('result/' + type + '_' + cfg.name + '_' + str(date) + '.png', dpi=400, bbox_inches='tight')
 
 def init_random_forest(dataset, training_data, label):
     '''
