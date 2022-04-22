@@ -8,4 +8,4 @@ dependencies:
   - cartopy=0.18.0
   - notebook=6.2.0
   - rasterio=1.2.0
-prefix: C:\Users\e16006469\Anaconda3\envs\egm722
+prefix: C:\Users\e16006469\Anaconda3\envs\egm722_project
