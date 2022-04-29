@@ -81,10 +81,12 @@ if (images):
 
     # Pre fire raster should be the one with the earliest date
     pre_fire = images[0]
-
+     
+    # These are the configurations needed for plotting 
     plot = {"bounds": cfg.bounds,
             "labels": cfg.labels,
             "colors": cfg.colors}
+            
     # Calculate the dNBR and dNDVI for all available post fire images and plot
     for post_fire in images[1:]:
         dnbr = dnbr(pre_fire, post_fire)
