@@ -81,12 +81,26 @@ if (images):
 
     # Pre fire raster should be the one with the earliest date
     pre_fire = images[0]
-    # Calculate the dNBR for all available post fire images and plot
+
+    plot = {"bounds": cfg.bounds,
+            "labels": cfg.labels,
+            "colors": cfg.colors}
+    # Calculate the dNBR and dNDVI for all available post fire images and plot
     for post_fire in images[1:]:
         dnbr = dnbr(pre_fire, post_fire)
-        plot_dnbr(dnbr, post_fire.date, crs)
+        plot_burn_severity("dNBR", dnbr, post_fire.date, plot, crs)
+        dndvi = dndvi(pre_fire, post_fire)
+        plot_burn_severity("dNDVI", dndvi, post_fire.date, plot, crs)
+        dndmi = dndmi(pre_fire, post_fire)
+        plot_burn_severity("dNDMI", dndmi, post_fire.date, plot, crs)
 else:
     print("No valid raster images found. Check your data directory.")
+
+# Plot spectral indices for each image
+for img in images:
+    img.plot("NBR", crs)
+    img.plot("NDVI", crs)
+    img.plot("NDMI", crs)
 ```
 To run the script simply run the script in a cmd prompt or in your favorite IDE with the correct conda environment.
 
@@ -97,6 +111,4 @@ To run the script simply run the script in a cmd prompt or in your favorite IDE 
 ### 2.4 Output
 
 Results from dNBR anaysis using the plot_dnbr function will be stored in a folder named __result__ in the root folder for the script. If it doesn't exist it will be created.
-
-### 2.5 Other available methods
 
