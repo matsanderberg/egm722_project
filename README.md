@@ -63,7 +63,7 @@ colors = ['green', 'yellow', 'orange', 'red', 'purple']
 
 The code for the dNBR analysis assumes data files are named a certain way. Any satellite image should be either a `.tif` or `.img` file and the file name must end with a date on the format YYYYMMDD, e.g. `karbole_sentinel2_20180626.img`. The script will assume the earliest image to be pre fire and the rest as post fire. At least one pre fire and one post fire should be provided. If a boundary file for the fire is provided the script will first crop images to the extent of that file. The boundary file should be a polygon as a shape file and end with boundary.shp, e.g. `fire_boundary.shp`.
 
-### 2.3 Run a dNBR analysis
+### 2.3 Run the analysis
 
 Provided below is an example how to use the satelliteimg.py to run a dNBR analysis on an arbirtray number of input files (the same code is also available in the repository in the `example.py`).
 
@@ -81,10 +81,18 @@ if (images):
 
     # Pre fire raster should be the one with the earliest date
     pre_fire = images[0]
-    # Calculate the dNBR for all available post fire images and plot
+     
+    # These are the configurations needed for plotting 
+    plot = {"bounds": cfg.bounds,
+            "labels": cfg.labels,
+            "colors": cfg.colors}
+            
+    # Calculate the dNBR and dNDVI for all available post fire images and plot
     for post_fire in images[1:]:
         dnbr = dnbr(pre_fire, post_fire)
-        plot_dnbr(dnbr, post_fire.date, crs)
+        plot_burn_severity("dNBR", dnbr, post_fire.date, plot, crs)
+        dndvi = dndvi(pre_fire, post_fire)
+        plot_burn_severity("dNDVI", dndvi, post_fire.date, plot, crs)
 else:
     print("No valid raster images found. Check your data directory.")
 ```
@@ -96,7 +104,5 @@ To run the script simply run the script in a cmd prompt or in your favorite IDE 
 
 ### 2.4 Output
 
-Results from dNBR anaysis using the plot_dnbr function will be stored in a folder named __result__ in the root folder for the script. If it doesn't exist it will be created.
-
-### 2.5 Other available methods
+Results from the analysis using the plot functions will be stored in a folder named __result__ in the root folder for the script. If it doesn't exist it will be created.
 
