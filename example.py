@@ -12,17 +12,17 @@ if (images):
     # Pre fire raster should be the one with the earliest date
     pre_fire = images[0]
 
+    # These are the configurations needed for plotting
     plot = {"bounds": cfg.bounds,
             "labels": cfg.labels,
             "colors": cfg.colors}
+
     # Calculate the dNBR and dNDVI for all available post fire images and plot
     for post_fire in images[1:]:
         dnbr = dnbr(pre_fire, post_fire)
         plot_burn_severity("dNBR", dnbr, post_fire.date, plot, crs)
         dndvi = dndvi(pre_fire, post_fire)
         plot_burn_severity("dNDVI", dndvi, post_fire.date, plot, crs)
-        dndmi = dndmi(pre_fire, post_fire)
-        plot_burn_severity("dNDMI", dndmi, post_fire.date, plot, crs)
 else:
     print("No valid raster images found. Check your data directory.")
 
@@ -37,7 +37,7 @@ for img in images:
 # ----------------------------------------------------------------------------------------
 
 # Load data
-dataset = images[1]
+dataset = images[1] # post fire image
 training_data = gpd.read_file('data_files/Karbole/training_data.shp').to_crs(dataset.crs)
 extent = dataset.get_extent()
 
@@ -57,9 +57,9 @@ cmap = matplotlib.colors.ListedColormap(colors)
 ax2.legend(handles, labels, fontsize=10, loc='lower left', framealpha=1)
 ax2.imshow(classification, cmap=cmap, transform=crs, extent=extent)
 
-fig.savefig('output_maps/classification.png', dpi=300, bbox_inches='tight')
+fig.savefig('result/classification.png', dpi=300, bbox_inches='tight')
 
-# Calculate size of area and compare to dNBR
+# Calculate size (in km2) of classified areas
 burned = classification[classification == 1]
 burned_size = (burned.size*20*20)/1000000
 unburned = classification[classification == 2]

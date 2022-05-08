@@ -240,7 +240,7 @@ def dndvi(prefire, postfire):
 
 def dndmi(prefire, postfire):
     '''
-    Takes two SatelliteImg objects and calculates the NDVI delta
+    Takes two SatelliteImg objects and calculates the NDMI delta
 
     Returns:
         dNDVI for the two input images
@@ -249,11 +249,11 @@ def dndmi(prefire, postfire):
 
 def reclassify(img, thresholds):
     '''
-    Reclassifies the image to the categories defined by threshold
+    Reclassifies the image to the categories defined by thresholds
 
     Args:
         img: a 3D array to be relcassified
-        thresholds: the delimiter values used for reclassification
+        thresholds: a list with the delimiter values used for reclassification
 
     Returns:
         The reclassified dNBR
