@@ -13,7 +13,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from sklearn.ensemble import RandomForestClassifier
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import config as cfg
 
 class SatelliteImg:
